@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package biga.v1;
+
+import "google/protobuf/descriptor.proto";
+
+// Everything in this file is a value the CLI, the server and the viewer must
+// agree on, written once. Each enum value carries its value in an option, and
+// protoc-gen-biga-contract turns them into constants in Go and TypeScript, so
+// no consumer copies a string or a number by hand.
+extend google.protobuf.EnumValueOptions {
+  string text = 50001;
+  int64 number = 50002;
+  RouteSpec route = 50003;
+}
+
+// An HTTP method and a path template. Placeholders are {name}, the syntax of
+// Go's ServeMux.
+message RouteSpec {
+  string method = 1;
+  string path = 2;
+}
+
+enum MediaType {
+  MEDIA_TYPE_UNSPECIFIED = 0;
+  // Request and response bodies.
+  MEDIA_TYPE_PROTOBUF = 1 [(text) = "application/x-protobuf"];
+  // The live stream: length-delimited StreamEvent messages.
+  MEDIA_TYPE_STREAM = 2 [(text) = "application/vnd.biga.stream+protobuf"];
+}
+
+enum Header {
+  HEADER_UNSPECIFIED = 0;
+  // Sent with every write to a server that requires an access key.
+  HEADER_ACCESS_KEY = 1 [(text) = "X-Biga-Key"];
+}
+
+// How a credential starts, so a stray one can be told from the others.
+enum TokenPrefix {
+  TOKEN_PREFIX_UNSPECIFIED = 0;
+  TOKEN_PREFIX_OWNER = 1 [(text) = "bgs_"];
+  TOKEN_PREFIX_ACCESS_KEY = 2 [(text) = "bgk_"];
+  TOKEN_PREFIX_EXTENSION = 3 [(text) = "bgx_"];
+}
+
+// The code in an Error message. New codes may be added; clients treat an
+// unknown one like its HTTP status.
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_INVALID_REQUEST = 1 [(text) = "invalid_request"];
+  ERROR_CODE_NOT_FOUND = 2 [(text) = "not_found"];
+  ERROR_CODE_UNAUTHORIZED = 3 [(text) = "unauthorized"];
+  ERROR_CODE_FORBIDDEN = 4 [(text) = "forbidden"];
+  ERROR_CODE_SESSION_LOCKED = 5 [(text) = "session_locked"];
+  ERROR_CODE_ACCESS_KEY_REQUIRED = 6 [(text) = "access_key_required"];
+  ERROR_CODE_ACCESS_KEY_INVALID = 7 [(text) = "access_key_invalid"];
+  ERROR_CODE_EXTENSION_TOKEN_INVALID = 8 [(text) = "extension_token_invalid"];
+  ERROR_CODE_EXTENSION_LIMIT = 9 [(text) = "extension_limit"];
+  ERROR_CODE_MARK_KEY_CONFLICT = 10 [(text) = "mark_key_conflict"];
+  ERROR_CODE_MISSING_BLOB = 11 [(text) = "missing_blob"];
+  ERROR_CODE_ENCRYPTION_MISMATCH = 12 [(text) = "encryption_mismatch"];
+  ERROR_CODE_STORAGE_QUOTA_EXCEEDED = 13 [(text) = "storage_quota_exceeded"];
+  ERROR_CODE_PAYLOAD_TOO_LARGE = 14 [(text) = "payload_too_large"];
+  ERROR_CODE_UNSUPPORTED_MEDIA_TYPE = 15 [(text) = "unsupported_media_type"];
+  ERROR_CODE_UNSUPPORTED_ENCODING = 16 [(text) = "unsupported_encoding"];
+  ERROR_CODE_NOT_ACCEPTABLE = 17 [(text) = "not_acceptable"];
+  ERROR_CODE_RATE_LIMITED = 18 [(text) = "rate_limited"];
+  ERROR_CODE_TOO_MANY_STREAMS = 19 [(text) = "too_many_streams"];
+  ERROR_CODE_SERVER_BUSY = 20 [(text) = "server_busy"];
+  ERROR_CODE_NOT_READY = 21 [(text) = "not_ready"];
+  ERROR_CODE_INTERNAL_ERROR = 22 [(text) = "internal_error"];
+  // Answers a write to an ended session on most routes.
+  ERROR_CODE_INVALID_STATE = 23 [(text) = "invalid_state"];
+  // Answers a write to an ended session on the heartbeat route.
+  ERROR_CODE_INACTIVE_SESSION = 24 [(text) = "inactive_session"];
+}
+
+// What the server accepts in requests it validates. The server reports the
+// limits an operator can change in Limits; these never change.
+enum Limit {
+  LIMIT_UNSPECIFIED = 0;
+  LIMIT_MAX_PATH_BYTES = 1 [(number) = 4096];
+  LIMIT_MAX_NAME_BYTES = 2 [(number) = 1024];
+  LIMIT_MAX_TREE_DEPTH = 3 [(number) = 256];
+  LIMIT_MAX_TITLE_RUNES = 4 [(number) = 120];
+  LIMIT_MAX_DESCRIPTION_RUNES = 5 [(number) = 500];
+  LIMIT_MAX_GROUP_ID_LENGTH = 6 [(number) = 64];
+  LIMIT_MAX_SESSION_ID_LENGTH = 7 [(number) = 64];
+  // Characters in a hex SHA-256 digest.
+  LIMIT_HASH_HEX_LENGTH = 8 [(number) = 64];
+}
+
+enum Pattern {
+  PATTERN_UNSPECIFIED = 0;
+  // A letter or digit, then up to 63 letters, digits, '_' or '-'.
+  PATTERN_SESSION_ID = 1 [(text) = "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"];
+  // A hex SHA-256 digest, in either case.
+  PATTERN_HASH = 2 [(text) = "^[0-9a-fA-F]{64}$"];
+}
+
+enum Route {
+  ROUTE_UNSPECIFIED = 0;
+  ROUTE_PUT_SESSION = 1 [(route) = {method: "PUT", path: "/api/sessions/{id}"}];
+  ROUTE_END_SESSION = 2 [(route) = {method: "DELETE", path: "/api/sessions/{id}"}];
+  ROUTE_POST_SNAPSHOT = 3 [(route) = {method: "POST", path: "/api/sessions/{id}/snapshot"}];
+  ROUTE_PUT_CHECKPOINT_MARK = 4 [(route) = {method: "PUT", path: "/api/sessions/{id}/checkpoints/marks/{key}"}];
+  ROUTE_MISSING_BLOBS = 5 [(route) = {method: "POST", path: "/api/sessions/{id}/blobs/missing"}];
+  ROUTE_UPLOAD_BLOBS = 6 [(route) = {method: "POST", path: "/api/sessions/{id}/blobs"}];
+  ROUTE_POST_CHECKPOINT = 7 [(route) = {method: "POST", path: "/api/sessions/{id}/checkpoint"}];
+  ROUTE_HEARTBEAT = 8 [(route) = {method: "POST", path: "/api/sessions/{id}/heartbeat"}];
+  ROUTE_GET_MANIFEST = 9 [(route) = {method: "GET", path: "/api/sessions/{id}/manifest"}];
+  ROUTE_CREATE_EXTENSION = 10 [(route) = {method: "POST", path: "/api/sessions/{id}/extensions"}];
+  ROUTE_LIST_EXTENSIONS = 11 [(route) = {method: "GET", path: "/api/sessions/{id}/extensions"}];
+  ROUTE_REVOKE_EXTENSION = 12 [(route) = {method: "DELETE", path: "/api/sessions/{id}/extensions/{extension}"}];
+  ROUTE_EXTENSION_EVENTS = 13 [(route) = {method: "GET", path: "/api/sessions/{id}/extension-events"}];
+  ROUTE_GET_SESSION = 14 [(route) = {method: "GET", path: "/api/sessions/{id}"}];
+  ROUTE_GET_STATE = 15 [(route) = {method: "GET", path: "/api/sessions/{id}/state"}];
+  ROUTE_LIST_CHECKPOINTS = 16 [(route) = {method: "GET", path: "/api/sessions/{id}/checkpoints"}];
+  ROUTE_GET_CHECKPOINT = 17 [(route) = {method: "GET", path: "/api/sessions/{id}/checkpoints/{seq}"}];
+  ROUTE_GET_FILE = 18 [(route) = {method: "GET", path: "/api/sessions/{id}/file"}];
+  ROUTE_GET_FILE_HISTORY = 19 [(route) = {method: "GET", path: "/api/sessions/{id}/file/history"}];
+  ROUTE_STREAM = 20 [(route) = {method: "GET", path: "/api/sessions/{id}/stream"}];
+  ROUTE_PREFLIGHT = 21 [(route) = {method: "OPTIONS", path: "/api/sessions/{path...}"}];
+  ROUTE_CRON_CLEANUP = 22 [(route) = {method: "GET", path: "/api/cron/cleanup"}];
+  ROUTE_HEALTHZ = 23 [(route) = {method: "GET", path: "/healthz"}];
+  ROUTE_READYZ = 24 [(route) = {method: "GET", path: "/readyz"}];
+}

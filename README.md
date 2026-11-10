@@ -14,6 +14,32 @@ repository to build:
 | `website` | `packages/types/src/gen` | `pnpm --filter @biga/types proto` |
 
 Each consumer has a `buf.gen.yaml` that reads this repository from `../proto`.
+Generating needs [buf](https://buf.build) and Go on your `PATH`.
+
+## Shared constants
+
+`biga/v1/contract.proto` holds every value the CLI, the server and the viewer
+must agree on: media types, the access key header, credential prefixes, error
+codes, validation limits, the session ID and hash patterns, and every route.
+Each is an enum value with its value in an option:
+
+```proto
+ERROR_CODE_NOT_FOUND = 2 [(text) = "not_found"];
+LIMIT_MAX_TITLE_RUNES = 4 [(number) = 120];
+ROUTE_GET_STATE = 15 [(route) = {method: "GET", path: "/api/sessions/{id}/state"}];
+```
+
+`protoc-gen-biga-contract` (in `cmd/`) turns them into constants next to the
+generated messages: `ErrorCodeNotFound` in Go, `ERROR_CODE_NOT_FOUND` in
+TypeScript, and for a route `RouteGetState`, `RouteGetStateMethod` and
+`RouteGetStatePath`. Nothing copies a string or a number by hand, so the three
+sides cannot drift. What stays out is what one side alone decides: timeouts,
+batch sizes, caches and the limits an operator can change, which the server
+reports in `Limits`.
+
+```sh
+go test ./...
+```
 
 ```sh
 buf lint

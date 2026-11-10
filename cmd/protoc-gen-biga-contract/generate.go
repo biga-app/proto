@@ -1,0 +1,249 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"go/format"
+	"path"
+	"strings"
+
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/pluginpb"
+)
+
+// Field numbers of the options in contract.proto.
+const (
+	textField   = 50001
+	numberField = 50002
+	routeField  = 50003
+)
+
+type constant struct {
+	name   string
+	text   *string
+	number *int64
+	route  *route
+}
+
+type route struct{ method, path string }
+
+func generate(req *pluginpb.CodeGeneratorRequest) *pluginpb.CodeGeneratorResponse {
+	resp := &pluginpb.CodeGeneratorResponse{
+		SupportedFeatures: proto.Uint64(uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL)),
+	}
+	lang := parameter(req.GetParameter(), "lang")
+	if lang != "go" && lang != "ts" {
+		resp.Error = proto.String(`parameter lang must be "go" or "ts"`)
+		return resp
+	}
+	files := make(map[string]*descriptorpb.FileDescriptorProto)
+	for _, f := range req.GetProtoFile() {
+		files[f.GetName()] = f
+	}
+	for _, name := range req.GetFileToGenerate() {
+		f := files[name]
+		consts, err := collect(f)
+		if err != nil {
+			resp.Error = proto.String(fmt.Sprintf("%s: %v", name, err))
+			return resp
+		}
+		if len(consts) == 0 {
+			continue
+		}
+		base := strings.TrimSuffix(name, ".proto") + "_consts"
+		file := &pluginpb.CodeGeneratorResponse_File{}
+		if lang == "go" {
+			file.Name = proto.String(base + ".go")
+			src, err := format.Source([]byte(renderGo(name, goPackage(f), consts)))
+			if err != nil {
+				resp.Error = proto.String(fmt.Sprintf("%s: format: %v", name, err))
+				return resp
+			}
+			file.Content = proto.String(string(src))
+		} else {
+			file.Name = proto.String(base + ".ts")
+			file.Content = proto.String(renderTS(name, consts))
+		}
+		resp.File = append(resp.File, file)
+	}
+	return resp
+}
+
+func parameter(params, key string) string {
+	for _, kv := range strings.Split(params, ",") {
+		if k, v, ok := strings.Cut(kv, "="); ok && k == key {
+			return v
+		}
+	}
+	return ""
+}
+
+// goPackage is the package name buf's managed mode put in go_package.
+func goPackage(f *descriptorpb.FileDescriptorProto) string {
+	pkg := f.GetOptions().GetGoPackage()
+	if _, name, ok := strings.Cut(pkg, ";"); ok {
+		return name
+	}
+	if pkg == "" {
+		return strings.ReplaceAll(f.GetPackage(), ".", "")
+	}
+	return path.Base(pkg)
+}
+
+func collect(f *descriptorpb.FileDescriptorProto) ([]constant, error) {
+	var out []constant
+	for _, e := range f.GetEnumType() {
+		for _, v := range e.GetValue() {
+			c, ok, err := readOptions(v.GetOptions().ProtoReflect().GetUnknown())
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", v.GetName(), err)
+			}
+			if ok {
+				c.name = v.GetName()
+				out = append(out, c)
+			}
+		}
+	}
+	return out, nil
+}
+
+// readOptions decodes the extension fields of an EnumValueOptions, which
+// arrive as unknown fields because this program does not link contract.proto.
+func readOptions(raw []byte) (constant, bool, error) {
+	var c constant
+	for len(raw) > 0 {
+		num, typ, n := protowire.ConsumeTag(raw)
+		if n < 0 {
+			return c, false, protowire.ParseError(n)
+		}
+		raw = raw[n:]
+		var used int
+		switch {
+		case num == textField && typ == protowire.BytesType:
+			var v []byte
+			v, used = protowire.ConsumeBytes(raw)
+			c.text = proto.String(string(v))
+		case num == numberField && typ == protowire.VarintType:
+			var v uint64
+			v, used = protowire.ConsumeVarint(raw)
+			c.number = proto.Int64(int64(v))
+		case num == routeField && typ == protowire.BytesType:
+			var v []byte
+			v, used = protowire.ConsumeBytes(raw)
+			if used >= 0 {
+				r, err := readRoute(v)
+				if err != nil {
+					return c, false, err
+				}
+				c.route = r
+			}
+		default:
+			used = protowire.ConsumeFieldValue(num, typ, raw)
+		}
+		if used < 0 {
+			return c, false, protowire.ParseError(used)
+		}
+		raw = raw[used:]
+	}
+	set := 0
+	for _, has := range []bool{c.text != nil, c.number != nil, c.route != nil} {
+		if has {
+			set++
+		}
+	}
+	if set > 1 {
+		return c, false, errors.New("more than one of text, number and route is set")
+	}
+	return c, set == 1, nil
+}
+
+func readRoute(raw []byte) (*route, error) {
+	r := &route{}
+	for len(raw) > 0 {
+		num, typ, n := protowire.ConsumeTag(raw)
+		if n < 0 {
+			return nil, protowire.ParseError(n)
+		}
+		raw = raw[n:]
+		var used int
+		if typ == protowire.BytesType && (num == 1 || num == 2) {
+			var v []byte
+			v, used = protowire.ConsumeBytes(raw)
+			if used >= 0 {
+				if num == 1 {
+					r.method = string(v)
+				} else {
+					r.path = string(v)
+				}
+			}
+		} else {
+			used = protowire.ConsumeFieldValue(num, typ, raw)
+		}
+		if used < 0 {
+			return nil, protowire.ParseError(used)
+		}
+		raw = raw[used:]
+	}
+	if r.method == "" || r.path == "" {
+		return nil, errors.New("a route needs a method and a path")
+	}
+	return r, nil
+}
+
+func header(w *strings.Builder, comment, source string) {
+	fmt.Fprintf(w, "%s Code generated by protoc-gen-biga-contract. DO NOT EDIT.\n%s source: %s\n\n", comment, comment, source)
+}
+
+func renderGo(source, pkg string, consts []constant) string {
+	var w strings.Builder
+	header(&w, "//", source)
+	fmt.Fprintf(&w, "package %s\n\n", pkg)
+	for _, c := range consts {
+		name := pascal(c.name)
+		switch {
+		case c.text != nil:
+			fmt.Fprintf(&w, "const %s = %q\n", name, *c.text)
+		case c.number != nil:
+			fmt.Fprintf(&w, "const %s = %d\n", name, *c.number)
+		case c.route != nil:
+			fmt.Fprintf(&w, "const (\n\t%s = %q\n\t%sMethod = %q\n\t%sPath = %q\n)\n",
+				name, c.route.method+" "+c.route.path, name, c.route.method, name, c.route.path)
+		}
+	}
+	return w.String()
+}
+
+func renderTS(source string, consts []constant) string {
+	var w strings.Builder
+	header(&w, "//", source)
+	for _, c := range consts {
+		switch {
+		case c.text != nil:
+			fmt.Fprintf(&w, "export const %s = %q;\n", c.name, *c.text)
+		case c.number != nil:
+			fmt.Fprintf(&w, "export const %s = %d;\n", c.name, *c.number)
+		case c.route != nil:
+			fmt.Fprintf(&w, "export const %s = %q;\nexport const %s_METHOD = %q;\nexport const %s_PATH = %q;\n",
+				c.name, c.route.method+" "+c.route.path, c.name, c.route.method, c.name, c.route.path)
+		}
+	}
+	return w.String()
+}
+
+// pascal turns MEDIA_TYPE_PROTOBUF into MediaTypeProtobuf. ID stays ID, as Go
+// style has it.
+func pascal(s string) string {
+	var w strings.Builder
+	for _, word := range strings.Split(s, "_") {
+		switch {
+		case word == "":
+		case word == "ID":
+			w.WriteString("ID")
+		default:
+			w.WriteString(word[:1] + strings.ToLower(word[1:]))
+		}
+	}
+	return w.String()
+}
