@@ -21,3 +21,12 @@ buf breaking --against '.git#branch=main'
 ```
 
 Field numbers are never reused. Add fields; do not renumber or change types.
+
+## Test vectors
+
+`testdata/e2ee-vectors.json` holds content sealed by the CLI for the
+[end-to-end encryption](https://biga.n10nce.dev/docs/encryption) scheme: a key and,
+for each case, the plaintext, the blob id and the sealed bytes. The CLI's tests
+regenerate it (`BIGA_UPDATE_VECTORS=1 go test ./internal/e2ee`), and the viewer's
+tests open every case, which is what keeps the Go and WebCrypto implementations
+compatible. Each consumer keeps a copy next to its tests.
