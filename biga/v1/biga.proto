@@ -197,9 +197,13 @@ message Error {
   map<string, string> details = 3;
 }
 
+// replayed is true when the server will send every checkpoint after the
+// position the viewer asked to resume from, so the viewer need not reload the
+// session state.
 message Connected {
   string session_id = 1;
   int64 timestamp = 2;
+  bool replayed = 3;
 }
 
 message SessionEnded {
@@ -229,4 +233,6 @@ message BridgeMessage {
   string session_id = 2;
   string name = 3;
   bytes frame = 4;
+  // The checkpoint number, for frames named "checkpoint".
+  int32 seq = 5;
 }
