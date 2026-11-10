@@ -1,0 +1,232 @@
+syntax = "proto3";
+
+package biga.v1;
+
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_ACTIVE = 1;
+  SESSION_STATUS_ENDED = 2;
+}
+
+enum ChangeType {
+  CHANGE_TYPE_UNSPECIFIED = 0;
+  CHANGE_TYPE_ADDED = 1;
+  CHANGE_TYPE_MODIFIED = 2;
+  CHANGE_TYPE_DELETED = 3;
+  CHANGE_TYPE_RENAMED = 4;
+}
+
+enum LoadMode {
+  LOAD_MODE_UNSPECIFIED = 0;
+  LOAD_MODE_EAGER = 1;
+  LOAD_MODE_LAZY = 2;
+}
+
+// Timestamps named *_at are RFC 3339 UTC strings with millisecond precision.
+// Timestamps named `timestamp` are Unix milliseconds.
+message Session {
+  string id = 1;
+  string title = 2;
+  optional string description = 3;
+  SessionStatus status = 4;
+  string created_at = 5;
+  string updated_at = 6;
+  optional string ended_at = 7;
+  optional string group_id = 8;
+}
+
+message PutSessionRequest {
+  optional string title = 1;
+  optional string description = 2;
+  optional string group_id = 3;
+}
+
+// token is set only on the response that created the session.
+message SessionGrant {
+  Session session = 1;
+  string token = 2;
+  string share_url = 3;
+}
+
+// A tree entry. File content is present only in uploads; stored and served
+// trees carry metadata only.
+message FileNode {
+  string name = 1;
+  string path = 2;
+  oneof kind {
+    FileInfo file = 3;
+    DirectoryInfo directory = 4;
+  }
+}
+
+message FileInfo {
+  int64 size = 1;
+  string hash = 2;
+  bool binary = 3;
+  bytes content = 4;
+}
+
+message DirectoryInfo {
+  repeated FileNode children = 1;
+  bool ignored = 2;
+}
+
+message FileSnapshot {
+  string session_id = 1;
+  FileNode tree = 2;
+  int64 timestamp = 3;
+  int64 sequence_num = 4;
+}
+
+message CheckpointEntry {
+  string path = 1;
+  ChangeType change_type = 2;
+  string old_path = 3;
+  optional string hash = 4;
+  int64 size = 5;
+  bool binary = 6;
+  bytes content = 7;
+}
+
+message CheckpointUpload {
+  string session_id = 1;
+  repeated CheckpointEntry entries = 2;
+  int64 timestamp = 3;
+}
+
+message CheckpointChange {
+  string path = 1;
+  ChangeType change_type = 2;
+  string old_path = 3;
+  optional string before_hash = 4;
+  optional string after_hash = 5;
+  int32 additions = 6;
+  int32 deletions = 7;
+  bool binary = 8;
+}
+
+message CheckpointSummary {
+  bool named = 1;
+  string session_id = 2;
+  int32 seq = 3;
+  string label = 4;
+  string created_at = 5;
+  int32 files_changed = 6;
+  int32 additions = 7;
+  int32 deletions = 8;
+}
+
+message Checkpoint {
+  CheckpointSummary summary = 1;
+  repeated CheckpointChange changes = 2;
+}
+
+message FileHistoryEntry {
+  int32 seq = 1;
+  string label = 2;
+  string created_at = 3;
+  ChangeType change_type = 4;
+  optional string before_hash = 5;
+  optional string after_hash = 6;
+  int32 additions = 7;
+  int32 deletions = 8;
+  bool binary = 9;
+}
+
+message ManifestEntry {
+  string path = 1;
+  string hash = 2;
+  int64 size = 3;
+  bool binary = 4;
+}
+
+message Manifest {
+  repeated ManifestEntry files = 1;
+}
+
+message SessionState {
+  Session session = 1;
+  optional FileSnapshot snapshot = 2;
+  repeated CheckpointSummary checkpoints = 3;
+  LoadMode mode = 4;
+  // Hash to content for every current text file, in eager mode only.
+  map<string, bytes> contents = 5;
+}
+
+message FileContent {
+  bytes content = 1;
+  bool binary = 2;
+  string hash = 3;
+}
+
+message ListCheckpointsResponse {
+  repeated CheckpointSummary checkpoints = 1;
+}
+
+message FileHistoryResponse {
+  repeated FileHistoryEntry history = 1;
+}
+
+message MarkCheckpointRequest {
+  string name = 1;
+}
+
+message Extension {
+  string id = 1;
+  string name = 2;
+  string created_at = 3;
+}
+
+// token is shown once, when the extension is created.
+message ExtensionGrant {
+  Extension extension = 1;
+  string token = 2;
+}
+
+message CreateExtensionRequest {
+  string name = 1;
+}
+
+message ListExtensionsResponse {
+  repeated Extension extensions = 1;
+}
+
+message Error {
+  string code = 1;
+  string message = 2;
+  map<string, string> details = 3;
+}
+
+message Connected {
+  string session_id = 1;
+  int64 timestamp = 2;
+}
+
+message SessionEnded {
+  string session_id = 1;
+  int64 timestamp = 2;
+}
+
+message Keepalive {
+  int64 timestamp = 1;
+}
+
+// The live stream is a sequence of StreamEvent messages, each preceded by its
+// length as an unsigned varint.
+message StreamEvent {
+  oneof event {
+    Connected connected = 1;
+    FileSnapshot snapshot = 2;
+    Checkpoint checkpoint = 3;
+    SessionEnded session_ended = 4;
+    Keepalive keepalive = 5;
+  }
+}
+
+// Carries an already encoded stream frame between server instances.
+message BridgeMessage {
+  string instance_id = 1;
+  string session_id = 2;
+  string name = 3;
+  bytes frame = 4;
+}
