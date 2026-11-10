@@ -33,12 +33,18 @@ message Session {
   string updated_at = 6;
   optional string ended_at = 7;
   optional string group_id = 8;
+  // The client seals file content with a key the server never sees, so the
+  // server stores bytes it cannot read. Fixed when the session is created.
+  bool encrypted = 9;
 }
 
 message PutSessionRequest {
   optional string title = 1;
   optional string description = 2;
   optional string group_id = 3;
+  // Asks for an encrypted session when creating one. A session never changes
+  // from one kind to the other.
+  bool encrypted = 4;
 }
 
 // What the server accepts, so a client can fail early with a useful message.
@@ -74,6 +80,9 @@ message FileInfo {
   string hash = 2;
   bool binary = 3;
   bytes content = 4;
+  // Lines in the file, reported by the client for an encrypted session, where
+  // the server cannot read the content to count them.
+  int32 lines = 5;
 }
 
 message DirectoryInfo {
@@ -96,6 +105,9 @@ message CheckpointEntry {
   int64 size = 5;
   bool binary = 6;
   bytes content = 7;
+  // Line counts the client reports for an encrypted session.
+  int32 additions = 8;
+  int32 deletions = 9;
 }
 
 message CheckpointUpload {
@@ -167,6 +179,8 @@ message FileContent {
   bytes content = 1;
   bool binary = 2;
   string hash = 3;
+  // True when content is sealed and the viewer has to open it with the key.
+  bool encrypted = 4;
 }
 
 message ListCheckpointsResponse {
