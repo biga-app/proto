@@ -41,11 +41,19 @@ message PutSessionRequest {
   optional string group_id = 3;
 }
 
+// What the server accepts, so a client can fail early with a useful message.
+message Limits {
+  int32 max_snapshot_files = 1;
+  int64 max_file_bytes = 2;
+  int64 max_blob_batch_bytes = 3;
+}
+
 // token is set only on the response that created the session.
 message SessionGrant {
   Session session = 1;
   string token = 2;
   string share_url = 3;
+  Limits limits = 4;
 }
 
 // A tree entry. File content is present only in uploads; stored and served
@@ -59,6 +67,8 @@ message FileNode {
   }
 }
 
+// A snapshot may leave a text file's content out when the server already holds
+// a blob with its hash, uploaded through UploadBlobs.
 message FileInfo {
   int64 size = 1;
   string hash = 2;
@@ -165,6 +175,23 @@ message ListCheckpointsResponse {
 
 message FileHistoryResponse {
   repeated FileHistoryEntry history = 1;
+}
+
+message MissingBlobsRequest {
+  repeated string hashes = 1;
+}
+
+message MissingBlobsResponse {
+  repeated string hashes = 1;
+}
+
+message Blob {
+  string hash = 1;
+  bytes content = 2;
+}
+
+message UploadBlobsRequest {
+  repeated Blob blobs = 1;
 }
 
 message MarkCheckpointRequest {
